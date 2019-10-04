@@ -13,7 +13,7 @@ type TTLRing struct {
 	store         map[string]*Item
 	maxSize       int
 	getFromRemote GetFromRemoteCallback
-	itemMutex     sync.RWMutex
+	mutex         sync.RWMutex
 	keyRing       *ring.Ring
 }
 
@@ -26,7 +26,7 @@ func New(getFromRemoteCallback GetFromRemoteCallback, maxSize int) *TTLRing {
 	}
 }
 
-// This function must be called from locked block
+// This function must be called from write locked mutex
 func (q *TTLRing) refreshFromRemote(key string, ttl time.Duration) *Item {
 
 	content := q.getFromRemote(key)
@@ -58,24 +58,24 @@ func (q *TTLRing) refreshFromRemote(key string, ttl time.Duration) *Item {
 
 func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 
-	q.itemMutex.RLock()
-	defer q.itemMutex.RUnlock()
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
 	item, exists := q.store[key]
 
 	if !exists {
 		// wait for acquiring the write lock. All read operations will be completed after this line.
-		q.itemMutex.Lock()
+		q.mutex.Lock()
 
 		item, exists = q.store[key]
 		if !exists { // Still not exists. So It's my job to get value from remote
 			item = q.refreshFromRemote(key, ttl)
 		}
 
-		q.itemMutex.Unlock()
+		q.mutex.Unlock()
 	} else {
 
 		if item.IsExpired() {
-			q.itemMutex.Lock() // wait for the write lock and all read operations are completed
+			q.mutex.Lock() // wait for the write lock and all read operations are completed
 
 			item, exists = q.store[key]
 			if !exists { // Key is deleted until we take the lock. So return nil
@@ -85,7 +85,7 @@ func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 				item = q.refreshFromRemote(key, ttl)
 			}
 
-			q.itemMutex.Unlock()
+			q.mutex.Unlock()
 			// Otherwise item is not expired
 		}
 	}
