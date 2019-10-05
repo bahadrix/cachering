@@ -1,4 +1,4 @@
-# CacheRing
+# CacheRing 💍
 
 TTL supported ring structure for caching purposes.
 
