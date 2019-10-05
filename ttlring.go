@@ -13,8 +13,9 @@ type TTLRing struct {
 	store         map[string]*Item
 	maxSize       int
 	getFromRemote GetFromRemoteCallback
-	mutex         sync.RWMutex
+	mutex         sync.Mutex
 	keyRing       *ring.Ring
+	statsAgent    *StatsAgent
 }
 
 func New(getFromRemoteCallback GetFromRemoteCallback, maxSize int) *TTLRing {
@@ -23,6 +24,7 @@ func New(getFromRemoteCallback GetFromRemoteCallback, maxSize int) *TTLRing {
 		maxSize:       maxSize,
 		getFromRemote: getFromRemoteCallback,
 		keyRing:       ring.New(maxSize),
+		statsAgent:    NewStatsAgent(),
 	}
 }
 
@@ -31,6 +33,7 @@ func (q *TTLRing) refreshFromRemote(key string, ttl time.Duration) *Item {
 
 	content := q.getFromRemote(key)
 	if content == nil {
+		_ = q.statsAgent.CommitEvent(EVENT_NOT_FOUND)
 		return nil
 	}
 	item := &Item{
@@ -58,8 +61,6 @@ func (q *TTLRing) refreshFromRemote(key string, ttl time.Duration) *Item {
 
 func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 
-	q.mutex.RLock()
-	defer q.mutex.RUnlock()
 	item, exists := q.store[key]
 
 	if !exists {
@@ -68,6 +69,7 @@ func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 
 		item, exists = q.store[key]
 		if !exists { // Still not exists. So It's my job to get value from remote
+			_ = q.statsAgent.CommitEvent(EVENT_MISS)
 			item = q.refreshFromRemote(key, ttl)
 		}
 
@@ -76,7 +78,7 @@ func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 
 		if item.IsExpired() {
 			q.mutex.Lock() // wait for the write lock and all read operations are completed
-
+			_ = q.statsAgent.CommitEvent(EVENT_EXPIRED)
 			item, exists = q.store[key]
 			if !exists { // Key is deleted until we take the lock. So return nil
 				return nil
@@ -87,6 +89,8 @@ func (q *TTLRing) Get(key string, ttl time.Duration) interface{} {
 
 			q.mutex.Unlock()
 			// Otherwise item is not expired
+		} else {
+			_ = q.statsAgent.CommitEvent(EVENT_HIT)
 		}
 	}
 	return item.Content

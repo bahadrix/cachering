@@ -1,6 +1,8 @@
 package cachering
 
-import "time"
+import (
+	"time"
+)
 
 type Item struct {
 	Content      interface{}
@@ -10,5 +12,5 @@ type Item struct {
 
 func (item *Item) IsExpired() bool {
 	deadline := item.BirthTime.Add(item.LifeDuration)
-	return deadline.Before(time.Now().UTC())
+	return time.Now().UTC().After(deadline)
 }
